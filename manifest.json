@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "PDF Cropper - MMSelect",
+  "version": "0.1.0",
+  "description": "Manipulateur local de bordereaux PDF (DPD, MondialRelay, DHL)",
+  "permissions": ["tabs", "activeTab", "scripting", "contextMenus", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "PDF Cropper"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/editor/editor.html", "assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Cropper</title>
+  <link rel="stylesheet" href="../styles/main.css" />
+</head>
+<body class="w-64 p-4 bg-white">
+  <h1 class="text-sm font-semibold text-gray-700 mb-3">PDF Cropper</h1>
+  <button
+    id="sendPdf"
+    disabled
+    class="w-full bg-green-600 text-white text-sm font-medium py-2 px-4 rounded-md hover:bg-green-700 active:bg-green-800 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+  >
+    Envoyer vers l'éditeur de bordereau
+  </button>
+  <p id="sendError" class="mt-1.5 text-xs text-red-600 hidden"></p>
+  <hr class="my-3 border-gray-200" />
+  <button
+    id="openEditor"
+    class="w-full bg-blue-600 text-white text-sm font-medium py-2 px-4 rounded-md hover:bg-blue-700 active:bg-blue-800 transition-colors cursor-pointer"
+  >
+    Ouvrir l'éditeur de bordereaux
+  </button>
+  <script type="module" src="./popup.js"></script>
+</body>
+</html>
