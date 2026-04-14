@@ -12,11 +12,14 @@ Extension Chrome (Manifest V3) pour recadrer et imprimer des bordereaux d'expéd
 
 - **Import PDF** depuis le sélecteur de fichier ou via le bouton "Envoyer vers l'éditeur" dans la popup (fonctionne sur n'importe quel onglet HTTP(S) affichant un PDF)
 - **Détection automatique du transporteur** par extraction de texte (pdf.js) et correspondance de mots-clés
-- **Zone de recadrage visuelle** : pré-dessinée au chargement (coordonnées calibrées par transporteur, ou 10×15 cm centré si inconnu), redéfinissable par cliquer-glisser directement sur le PDF
+- **Zone de recadrage visuelle** : pré-dessinée au chargement (coordonnées calibrées par transporteur, ou 10×15 cm centré si inconnu) — redimensionnable en glissant l'une des 8 poignées (coins + milieux des côtés), déplaçable en glissant l'intérieur, ou redessinable depuis zéro en glissant une zone vide
 - **Masque de recadrage** : zone hors sélection assombrie pour visualiser immédiatement ce qui sera imprimé
 - **Toggle "Recadrage ON/OFF"** : OFF → impression de la page entière, ON → impression de la zone sélectionnée
 - **Zoom** (×0.5 à ×3.0) sur le PDF affiché
 - **Impression** via iframe (stratégie primaire) ou canvas (fallback) avec support de la rotation
+- **Panneau d'informations** (barre latérale gauche) : date/heure de chargement, nom du fichier, transporteur détecté, nom et adresse du destinataire extraits de façon heuristique
+- **Pastille verte** sur l'icône de l'extension quand un PDF est confirmé dans l'onglet actif (fichier local avec permission, ou HTTP avec `Content-Type: application/pdf`)
+- **Titre de l'onglet** mis à jour : `MMShip | {nom_du_fichier}` quand un PDF est chargé, `MMShip label cropper` sinon
 
 ---
 
@@ -74,10 +77,10 @@ src/
 ### `src/popup/popup.js`
 
 - Au chargement : interroge l'onglet actif (`chrome.tabs.query`), puis fait une requête `HEAD` sur l'URL pour vérifier le `Content-Type` avant d'activer le bouton "Envoyer" :
-  - `Content-Type: application/pdf` → bouton activé
-  - HTTP 200 + non-PDF → bouton grisé + message *"Aucun PDF détecté dans cet onglet."*
-  - Erreur réseau, 401/403, HEAD non supporté → bouton activé de façon optimiste (le SW revalidera avec GET)
-  - URL non-HTTP(S) (onglet interne, fichier local) → bouton grisé + message explicatif
+  - `Content-Type: application/pdf` → bouton activé + **pastille verte** définie sur l'icône de l'extension
+  - HTTP 200 + non-PDF → bouton grisé + message *"Aucun PDF détecté dans cet onglet."* + pastille effacée
+  - Erreur réseau, 401/403, HEAD non supporté → bouton activé de façon optimiste (pas de pastille ; le SW revalidera avec GET)
+  - URL non-HTTP(S) (onglet interne, fichier local) → bouton grisé + message explicatif + pastille effacée
 - Bouton "Envoyer" : passe en "Chargement…", envoie `{ action: 'sendPdfToEditor', url, tabId }` au SW, attend la réponse async, affiche une erreur inline si échec
 - Bouton "Ouvrir l'éditeur" : ouvre l'éditeur vide (fire-and-forget)
 
@@ -92,13 +95,18 @@ currentScale    // zoom actuel (défaut 1.5)
 detectedCarrier // clé carriers.js ou null
 cropRect        // { x, y, width, height } en pixels canvas au currentScale
 cropEnabled     // toggle recadrage ON/OFF
+pdfTitle        // nom du fichier sans extension (titre onglet + panneau info)
+pdfRawText      // texte brut extrait par pdf.js (heuristique destinataire)
 ```
 
-**Au chargement d'un PDF (`loadPdfFromBuffer`) :**
+**Au chargement d'un PDF (`loadPdfFromBuffer(arrayBuffer, title)`) :**
 1. Extraction texte + détection transporteur
-2. `cropRect = computeInitialCropRect()` → coords transporteur ou zone 10×15 cm centrée
-3. Rendu + affichage du masque de recadrage
-4. `activateDrawing(cropOverlay, callback)` → dessin direct toujours actif, pas de bouton à activer
+2. `document.title` mis à jour → `MMShip | {title}`
+3. `cropRect = computeInitialCropRect()` → coords transporteur ou zone 10×15 cm centrée
+4. Rendu + affichage du masque de recadrage
+5. `activateDrawing(cropOverlay, cropRect, callback)` → pré-charge la zone initiale pour que les poignées soient immédiatement actives
+6. `updateInfoPanel()` → peuple la barre latérale gauche
+7. `extractRecipient(pdfRawText)` → cherche le mot-clé "destinataire", puis un code postal français pour extraire nom + adresse + ville
 
 **Conversions de coordonnées :**
 ```
@@ -110,12 +118,19 @@ Le système de coordonnées PDF a l'origine en bas-gauche (y croît vers le haut
 
 ### `src/editor/cropOverlay.js`
 
-- `activateDrawing(canvas, onCropDefined)` : attache les listeners mousedown/move/up, curseur crosshair
+- `activateDrawing(canvas, initialRect, onCropDefined)` : attache les listeners mousedown/move/up ; pré-charge un rect existant pour que ses poignées soient immédiatement manipulables
 - `deactivateDrawing(canvas)` : supprime les listeners (handlers stockés dans un objet module-level pour le removeEventListener)
+- `setCurrentRect(rect)` : synchronise le rect interne du module quand l'éditeur le modifie de l'extérieur (rescale zoom, reset toggle) — évite un état périmé lors du prochain drag
 - `drawRect(canvas, rect)` :
   1. Remplit tout le canvas en `rgba(0,0,0,0.40)` (masque sombre)
   2. `clearRect(rect)` → découpe transparente sur la zone sélectionnée (laisse voir le PDF en dessous)
-  3. Dessine la bordure pointillée bleue + poignées carrées aux 4 coins (centrées sur les angles)
+  3. Dessine la bordure pointillée bleue + **8 poignées carrées** (4 coins + 4 milieux de côté) avec bord blanc
+- **Modèle d'interaction** (3 modes, piloté par `hitTest`) :
+  - Glisser une **poignée** → mode `resizing` : `applyResize(handle, origRect, dx, dy)` déplace les bords correspondants avec une taille minimale de 10 px
+  - Glisser **l'intérieur** → mode `moving` : translate le rect, borné aux dimensions du canvas
+  - Glisser une **zone vide** → mode `drawing` : dessine un nouveau rect depuis zéro
+- Les listeners `mousemove`/`mouseup` au niveau `document` sont enregistrés au `mousedown` et retirés au relâchement : le suivi n'est jamais perdu si la souris sort du canvas
+- Curseurs contextuels : `nw-resize`, `ns-resize`, `ne-resize`, `ew-resize`, `sw-resize`, `se-resize`, `move`, `crosshair`
 
 ### `src/editor/pdfPrinter.js`
 

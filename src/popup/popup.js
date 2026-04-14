@@ -8,12 +8,44 @@ openBtn.addEventListener('click', () => {
   window.close()
 })
 
+// ─── Badge vert sur l'icône de l'extension ────────────────────────────────
+function setBadge(isPdf, tabId) {
+  if (isPdf) {
+    chrome.action.setBadgeText({ text: '●', tabId })
+    chrome.action.setBadgeBackgroundColor({ color: '#22C55E', tabId })
+  } else {
+    chrome.action.setBadgeText({ text: '', tabId })
+  }
+}
+
 // ─── Vérifier si l'onglet actif contient un PDF ───────────────────────────
 chrome.tabs.query({ active: true, currentWindow: true }, async ([tab]) => {
   const url = tab?.url ?? ''
 
+  // Fichier local (file://)
+  if (url.startsWith('file://')) {
+    if (!url.toLowerCase().endsWith('.pdf')) {
+      setStatus('Ouvrez un PDF dans un onglet pour l\'envoyer.', false)
+      setBadge(false, tab.id)
+      return
+    }
+    const allowed = await chrome.extension.isAllowedFileSchemeAccess()
+    if (allowed) {
+      sendBtn.disabled = false
+      setBadge(true, tab.id)
+    } else {
+      setBadge(false, tab.id)
+      setStatus(
+        'Fichier local détecté. Activez "Accès aux URL de fichiers" dans les réglages de l\'extension.',
+        false,
+      )
+    }
+    return
+  }
+
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     setStatus('Ouvrez un PDF dans un onglet pour l\'envoyer.', false)
+    setBadge(false, tab.id)
     return
   }
 
@@ -21,15 +53,20 @@ chrome.tabs.query({ active: true, currentWindow: true }, async ([tab]) => {
     const res = await fetch(url, { method: 'HEAD' })
     const contentType = res.headers.get('content-type') ?? ''
 
-    if (res.ok && !contentType.includes('application/pdf')) {
+    if (res.ok && contentType.includes('application/pdf')) {
+      // PDF confirmé
+      sendBtn.disabled = false
+      setBadge(true, tab.id)
+    } else if (res.ok && !contentType.includes('application/pdf')) {
       // Réponse claire : ce n'est pas un PDF
       setStatus('Aucun PDF détecté dans cet onglet.', false)
+      setBadge(false, tab.id)
     } else {
-      // PDF confirmé, ou réponse ambiguë (auth requise, erreur serveur) → optimiste
+      // Réponse ambiguë (auth requise, erreur serveur) → optimiste, pas de badge
       sendBtn.disabled = false
     }
   } catch {
-    // Erreur réseau ou HEAD non supporté → activer par optimisme
+    // Erreur réseau ou HEAD non supporté → activer par optimisme, pas de badge
     sendBtn.disabled = false
   }
 })
@@ -46,7 +83,7 @@ sendBtn.addEventListener('click', () => {
       (response) => {
         if (chrome.runtime.lastError || !response?.ok) {
           sendBtn.disabled = false
-          sendBtn.textContent = 'Envoyer vers l\'éditeur de bordereau'
+          sendBtn.textContent = 'Envoyer à MMShip pour impression'
           setStatus(response?.error ?? 'Impossible de récupérer le PDF.', true)
         } else {
           window.close()

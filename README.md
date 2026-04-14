@@ -12,11 +12,14 @@ A Chrome Extension (Manifest V3) to crop and print PDF shipping labels directly 
 
 - **PDF import** via file picker or the "Send to editor" button in the popup (works on any HTTP(S) tab displaying a PDF)
 - **Automatic carrier detection** via text extraction (pdf.js) and keyword matching
-- **Visual crop zone** pre-drawn on load (calibrated coordinates per carrier, or a centered 10×15 cm default for unknown carriers), re-drawable by click-and-drag directly on the PDF
+- **Visual crop zone** pre-drawn on load (calibrated coordinates per carrier, or a centered 10×15 cm default for unknown carriers) — resize by dragging any of the 8 handles (corners + edge midpoints), move by dragging the interior, or redraw from scratch by dragging an empty area
 - **Crop mask** darkens the area outside the selection so you immediately see what will be printed
 - **"Crop ON/OFF" toggle** — OFF prints the full page, ON prints the selected zone
 - **Zoom** (×0.5 to ×3.0) on the displayed PDF
 - **Print** via iframe (primary strategy) or canvas (fallback), with rotation support
+- **Info panel** (left sidebar): load date/time, PDF filename, detected carrier, and a heuristically extracted recipient name/address
+- **Green badge** on the extension icon when a PDF is confirmed in the active tab (file:// with permission, or HTTP with `Content-Type: application/pdf`)
+- **Tab title** updates to `MMShip | {filename}` when a PDF is loaded, reverts to `MMShip label cropper` otherwise
 
 ---
 
@@ -74,10 +77,10 @@ src/
 ### `src/popup/popup.js`
 
 - On load: queries the active tab (`chrome.tabs.query`), then sends a `HEAD` request to check `Content-Type` before enabling the "Send" button:
-  - `Content-Type: application/pdf` → button enabled
-  - HTTP 200 + non-PDF → button disabled + message *"No PDF detected in this tab."*
-  - Network error, 401/403, HEAD not supported → button enabled optimistically (the SW will re-validate with GET)
-  - Non-HTTP(S) URL (internal tab, local file) → button disabled + explanatory message
+  - `Content-Type: application/pdf` → button enabled + **green badge** set on the extension icon
+  - HTTP 200 + non-PDF → button disabled + message *"No PDF detected in this tab."* + badge cleared
+  - Network error, 401/403, HEAD not supported → button enabled optimistically (no badge; the SW will re-validate with GET)
+  - Non-HTTP(S) URL (internal tab, local file) → button disabled + explanatory message + badge cleared
 - "Send" button: switches to "Loading…", sends `{ action: 'sendPdfToEditor', url, tabId }` to the SW, awaits the async response, shows inline error on failure
 - "Open editor" button: opens an empty editor (fire-and-forget)
 
@@ -92,13 +95,18 @@ currentScale    // current zoom (default 1.5)
 detectedCarrier // key from carriers.js, or null
 cropRect        // { x, y, width, height } in canvas pixels at currentScale
 cropEnabled     // crop ON/OFF toggle state
+pdfTitle        // filename without extension (for tab title + info panel)
+pdfRawText      // raw text extracted by pdf.js (for recipient heuristic)
 ```
 
-**On PDF load (`loadPdfFromBuffer`):**
+**On PDF load (`loadPdfFromBuffer(arrayBuffer, title)`):**
 1. Text extraction + carrier detection
-2. `cropRect = computeInitialCropRect()` → carrier coordinates or centered 10×15 cm zone
-3. Render + display crop mask
-4. `activateDrawing(cropOverlay, callback)` → direct drawing always active, no button needed
+2. `document.title` set to `MMShip | {title}`
+3. `cropRect = computeInitialCropRect()` → carrier coordinates or centered 10×15 cm zone
+4. Render + display crop mask
+5. `activateDrawing(cropOverlay, cropRect, callback)` → pre-loads the initial zone so handles are immediately active
+6. `updateInfoPanel()` → populates the left sidebar
+7. `extractRecipient(pdfRawText)` → searches for "destinataire" keyword, then falls back to a French postal code pattern to extract name + address + city
 
 **Coordinate conversions:**
 ```
@@ -110,12 +118,19 @@ The PDF coordinate system has its origin at the bottom-left corner (y increases 
 
 ### `src/editor/cropOverlay.js`
 
-- `activateDrawing(canvas, onCropDefined)`: attaches mousedown/move/up listeners, crosshair cursor
+- `activateDrawing(canvas, initialRect, onCropDefined)`: attaches mousedown/move/up listeners; pre-loads an existing rect so its handles are immediately draggable
 - `deactivateDrawing(canvas)`: removes listeners (handlers stored in a module-level object for clean `removeEventListener`)
+- `setCurrentRect(rect)`: syncs the module's internal rect when the editor changes it externally (zoom rescale, toggle reset) — prevents stale state during the next drag
 - `drawRect(canvas, rect)`:
   1. Fills the entire canvas with `rgba(0,0,0,0.40)` (dark mask)
   2. `clearRect(rect)` → transparent cutout over the selected zone (shows the PDF beneath)
-  3. Draws a dashed blue border + square handles at the 4 corners (centered on the corner points)
+  3. Draws a dashed blue border + **8 square handles** (4 corners + 4 edge midpoints) with white border
+- **Interaction model** (3 modes, driven by `hitTest`):
+  - Drag a **handle** → `resizing` mode: `applyResize(handle, origRect, dx, dy)` moves the appropriate edges while enforcing a 10 px minimum size
+  - Drag the **interior** → `moving` mode: translates the rect, clamped to canvas bounds
+  - Drag an **empty area** → `drawing` mode: creates a new rect from scratch
+- Document-level `mousemove`/`mouseup` listeners are registered on `mousedown` and removed on release, so dragging outside the canvas never loses tracking
+- Contextual cursors: `nw-resize`, `ns-resize`, `ne-resize`, `ew-resize`, `sw-resize`, `se-resize`, `move`, `crosshair`
 
 ### `src/editor/pdfPrinter.js`
 

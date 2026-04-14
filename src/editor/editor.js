@@ -4,6 +4,7 @@ import {
   deactivateDrawing,
   drawRect,
   clearOverlay,
+  setCurrentRect,
 } from './cropOverlay.js'
 import { printCropped, printViaCanvas } from './pdfPrinter.js'
 import { carriers, detectCarrier } from '../config/carriers.js'
@@ -26,6 +27,11 @@ const zoomInBtn       = document.getElementById('zoomIn')
 const zoomOutBtn      = document.getElementById('zoomOut')
 const coordsDisplay   = document.getElementById('coordsDisplay')
 const coordsText      = document.getElementById('coordsText')
+const infoPanel       = document.getElementById('infoPanel')
+const infoPdfDate     = document.getElementById('infoPdfDate')
+const infoPdfTitle    = document.getElementById('infoPdfTitle')
+const infoCarrier     = document.getElementById('infoCarrier')
+const infoRecipient   = document.getElementById('infoRecipient')
 
 // ─── État ─────────────────────────────────────────────────────────────────────
 let pdfPage         = null   // PDFPageProxy pdf.js
@@ -36,9 +42,11 @@ let currentScale    = 1.5
 let detectedCarrier = null   // clé dans carriers (ex: 'DPD') ou null
 let cropRect        = null   // { x, y, width, height } en pixels canvas au currentScale
 let cropEnabled     = true   // toggle recadrage ON/OFF
+let pdfTitle        = ''     // nom du fichier sans extension
+let pdfRawText      = ''     // texte brut extrait du PDF
 
 // ─── Chargement d'un PDF depuis un ArrayBuffer ────────────────────────────────
-async function loadPdfFromBuffer(arrayBuffer) {
+async function loadPdfFromBuffer(arrayBuffer, title = '') {
   printBtn.disabled = true
   setCarrier(null)
 
@@ -51,6 +59,10 @@ async function loadPdfFromBuffer(arrayBuffer) {
     pdfPage = result.page
     pdfPageWidth = result.pageWidth
     pdfPageHeight = result.pageHeight
+
+    pdfTitle   = title
+    pdfRawText = result.textContent
+    document.title = title ? `MMShip | ${title}` : 'MMShip label cropper'
 
     // Détection automatique du transporteur
     detectedCarrier = detectCarrier(result.textContent)
@@ -77,12 +89,14 @@ async function loadPdfFromBuffer(arrayBuffer) {
     zoomControls.classList.remove('hidden')
     zoomControls.classList.add('flex')
 
-    // Activer le dessin direct — toujours actif, pas besoin de bouton
+    // Activer le dessin avec la zone initiale pré-chargée
     deactivateDrawing(cropOverlay) // nettoyer d'anciens listeners si re-chargement
-    activateDrawing(cropOverlay, (rect) => {
+    activateDrawing(cropOverlay, cropRect, (rect) => {
       cropRect = rect
       showCropCoords(rect)
     })
+
+    updateInfoPanel()
   } catch (err) {
     console.error('[MMShip] Erreur lors du chargement du PDF :', err)
     alert(`Erreur lors du chargement du PDF : ${err.message}`)
@@ -95,7 +109,7 @@ async function loadPdfFromBuffer(arrayBuffer) {
 pdfInput.addEventListener('change', async (e) => {
   const file = e.target.files[0]
   if (!file) return
-  await loadPdfFromBuffer(await file.arrayBuffer())
+  await loadPdfFromBuffer(await file.arrayBuffer(), file.name.replace(/\.pdf$/i, ''))
   pdfInput.value = '' // permet de ré-importer le même fichier
 })
 
@@ -123,6 +137,7 @@ cropToggle.addEventListener('change', () => {
     cropToggleLabel.textContent = 'ON'
     cropToggleLabel.className = 'text-sm font-semibold text-emerald-600'
     cropRect = computeInitialCropRect()
+    setCurrentRect(cropRect)
     cropOverlay.style.pointerEvents = 'auto'
     renderAndSyncOverlay().then(() => showCropCoords(cropRect))
   } else {
@@ -130,6 +145,7 @@ cropToggle.addEventListener('change', () => {
     cropToggleLabel.textContent = 'OFF'
     cropToggleLabel.className = 'text-sm font-semibold text-gray-400'
     cropRect = null
+    setCurrentRect(null)
     clearOverlay(cropOverlay)
     cropOverlay.style.pointerEvents = 'none'
     hideCropCoords()
@@ -159,6 +175,7 @@ async function applyZoom(newScale) {
       width: cropRect.width * factor,
       height: cropRect.height * factor,
     }
+    setCurrentRect(cropRect) // synchroniser l'état interne du module overlay
   }
 
   await renderAndSyncOverlay()
@@ -274,6 +291,47 @@ function hideCropCoords() {
   coordsDisplay.classList.add('hidden')
 }
 
+// ─── Panneau d'informations latéral ──────────────────────────────────────────
+function updateInfoPanel() {
+  if (!pdfPage) {
+    infoPanel.classList.add('hidden')
+    return
+  }
+  infoPanel.classList.remove('hidden')
+
+  const now = new Date()
+  infoPdfDate.textContent = now.toLocaleDateString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+  infoPdfTitle.textContent  = pdfTitle || '(sans titre)'
+  infoCarrier.textContent   = detectedCarrier ?? '—'
+  infoRecipient.textContent = extractRecipient(pdfRawText) ?? '—'
+}
+
+// ─── Extraction heuristique du destinataire ───────────────────────────────────
+function extractRecipient(text) {
+  if (!text) return null
+
+  // Chercher le mot-clé "destinataire" et prendre ce qui suit
+  const idx = text.search(/destinataire/i)
+  if (idx !== -1) {
+    const snippet = text
+      .slice(idx + 'destinataire'.length, idx + 250)
+      .replace(/^[\s:/]+/, '')
+      .trim()
+    if (snippet.length > 3) return snippet.slice(0, 200)
+  }
+
+  // Chercher un code postal français (5 chiffres) et extraire le contexte
+  const m = text.match(/(.{5,80}?)\s(\d{5})\s+([A-ZÉÀÈÊÎÔÙ][A-ZÉÀÈÊÎÔÙa-zéàèêîôù\s-]{1,30})/u)
+  if (m) {
+    return `${m[1].trim()}\n${m[2]} ${m[3].trim()}`
+  }
+
+  return null
+}
+
 // ─── Chargement du PDF depuis le menu contextuel / popup ─────────────────────
 async function checkPendingPdf() {
   const result = await chrome.storage.session.get('pendingPdf')
@@ -281,12 +339,31 @@ async function checkPendingPdf() {
 
   await chrome.storage.session.remove('pendingPdf') // libérer immédiatement
 
-  const { base64 } = result.pendingPdf
+  const { isLocalUrl, url, base64 } = result.pendingPdf
+  const urlTitle = decodeURIComponent(url.split('/').pop()).replace(/\.pdf$/i, '')
+
+  if (isLocalUrl) {
+    // Fichier local : la page éditeur peut fetcher file:// si l'option est activée.
+    try {
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      await loadPdfFromBuffer(await response.arrayBuffer(), urlTitle)
+    } catch (err) {
+      console.error('[MMShip] Impossible de lire le fichier local :', err)
+      alert(
+        'Impossible de lire le fichier local.\n\n' +
+        'Assurez-vous que l\'option "Accès aux URL de fichiers" est activée ' +
+        'dans les réglages de l\'extension (chrome://extensions/).',
+      )
+    }
+    return
+  }
+
+  // PDF distant : décoder le base64 reçu depuis le service worker
   const binary = atob(base64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-
-  await loadPdfFromBuffer(bytes.buffer)
+  await loadPdfFromBuffer(bytes.buffer, urlTitle)
 }
 
 checkPendingPdf()
