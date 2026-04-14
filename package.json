@@ -1,7 +1,7 @@
 {
-  "name": "pdf-cropper-mmselect",
+  "name": "mmship-shipping-label-cropper",
   "version": "0.1.0",
-  "description": "Extension Chrome locale pour manipuler les bordereaux PDF",
+  "description": "Chrome extension to crop and print shipping labels locally",
   "private": true,
   "scripts": {
     "dev": "vite",

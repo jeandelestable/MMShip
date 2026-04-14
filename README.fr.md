@@ -1,6 +1,6 @@
 🇬🇧 [English version](README.md)
 
-# PDF Cropper — MMSelect
+# MMShip — Shipping label cropper
 
 Extension Chrome (Manifest V3) pour recadrer et imprimer des bordereaux d'expédition PDF directement depuis le navigateur, sans serveur ni service externe. Tout le traitement est local.
 
@@ -61,7 +61,7 @@ src/
 
 ### `src/background.js` — Service Worker
 
-- Enregistre le menu contextuel "Envoyer dans l'éditeur MMSelect" (via `onInstalled`)
+- Enregistre le menu contextuel "Envoyer dans l'éditeur MMShip" (via `onInstalled`)
 - Sur clic menu contextuel **ou** message `sendPdfToEditor` depuis la popup :
   1. `fetch(pdfUrl)` — possible sur tous les domaines grâce à `host_permissions: ["<all_urls>"]`
   2. Vérifie que le `Content-Type` est `application/pdf` — lève une erreur sinon (évite de fermer l'onglet source pour une page HTML)

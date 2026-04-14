@@ -1,6 +1,6 @@
 🇫🇷 [Version française](README.fr.md)
 
-# PDF Cropper — MMSelect
+# MMShip — Shipping label cropper
 
 A Chrome Extension (Manifest V3) to crop and print PDF shipping labels directly from the browser — no server, no external service. Everything runs locally.
 
@@ -61,7 +61,7 @@ src/
 
 ### `src/background.js` — Service Worker
 
-- Registers the context menu item "Send to MMSelect editor" (via `onInstalled`)
+- Registers the context menu item "Send to MMShip editor" (via `onInstalled`)
 - On context menu click **or** `sendPdfToEditor` message from the popup:
   1. `fetch(pdfUrl)` — works on all domains thanks to `host_permissions: ["<all_urls>"]`
   2. Validates that `Content-Type` is `application/pdf` — throws otherwise (prevents closing the source tab for an HTML page)

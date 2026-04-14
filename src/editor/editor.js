@@ -84,7 +84,7 @@ async function loadPdfFromBuffer(arrayBuffer) {
       showCropCoords(rect)
     })
   } catch (err) {
-    console.error('[PDF Cropper] Erreur lors du chargement du PDF :', err)
+    console.error('[MMShip] Erreur lors du chargement du PDF :', err)
     alert(`Erreur lors du chargement du PDF : ${err.message}`)
   } finally {
     printBtn.disabled = false
@@ -192,11 +192,11 @@ printBtn.addEventListener('click', async () => {
   try {
     await printCropped(pdfBytesOrig.slice(), cropCoordsPdf, printFrame, printRotation)
   } catch (err) {
-    console.warn('[PDF Cropper] Impression via iframe échouée, fallback canvas :', err.message)
+    console.warn('[MMShip] Impression via iframe échouée, fallback canvas :', err.message)
     try {
       await printViaCanvas(pdfPage, cropCoordsPdf, pdfPageHeight, printCanvas, printRotation)
     } catch (err2) {
-      console.error('[PDF Cropper] Impression fallback échouée :', err2)
+      console.error('[MMShip] Impression fallback échouée :', err2)
       alert('Impossible d\'imprimer. Vérifiez la console pour les détails.')
     }
   } finally {

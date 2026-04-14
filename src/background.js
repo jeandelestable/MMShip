@@ -13,7 +13,7 @@
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'sendToEditor',
-    title: 'Envoyer dans l\'éditeur de bordereau MMSelect',
+    title: 'Envoyer dans l\'éditeur de bordereau MMShip',
     contexts: ['page'],
   })
 })
@@ -48,7 +48,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     await fetchAndStorePdf(tab.url)
   } catch (err) {
-    console.error('[PDF Cropper] Impossible de récupérer le PDF :', err.message)
+    console.error('[MMShip] Impossible de récupérer le PDF :', err.message)
   }
 })
 
